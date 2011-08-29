@@ -561,8 +561,10 @@ class Status(object):
       if 'hashtags' in data['entities']:
         hashtags = [Hashtag.NewFromJsonDict(h) for h in data['entities']['hashtags']]
 
+    #print data
     if 'retweeted_status' in data:
       text = data['retweeted_status']['text'] or 'retweet text fail'
+      user = User.NewFromJsonDict(data['retweeted_status']['user'])
     else:
       text = data.get('text', None) 
 
