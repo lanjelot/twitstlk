@@ -2242,15 +2242,16 @@ class Api(object):
     parameters = {}
     if exclude:
       parameters['exclude'] = exclude
-    url = '%s/trends/current.json' % self.base_url
+    url = '%s/trends/1.json' % self.base_url
     json = self._FetchUrl(url, parameters=parameters)
     data = simplejson.loads(json)
     self._CheckForTwitterError(data)
     trends = []
 
-    for t in data['trends']:
-      for item in data['trends'][t]:
-        trends.append(Trend.NewFromJsonDict(item, timestamp = t))
+    for t in data[0]['trends']:
+      trends.append(Trend.NewFromJsonDict(t))
+      #for item in data[0]['trends'][t]:
+      #  trends.append(Trend.NewFromJsonDict(item, timestamp = t))
     return trends
 
   def GetTrendsDaily(self, exclude=None, startdate=None):
@@ -2330,6 +2331,7 @@ class Api(object):
                          count=None,
                          page=None,
                          since_id=None,
+                         max_id=None,
                          retweets=None,
                          include_entities=None):
     '''Fetch the sequence of twitter.Status messages for a user's friends
@@ -2386,6 +2388,8 @@ class Api(object):
         raise TwitterError("'page' must be an integer")
     if since_id:
       parameters['since_id'] = since_id
+    if max_id:
+      parameters['max_id'] = max_id
     if retweets:
       parameters['include_rts'] = True
     if include_entities:

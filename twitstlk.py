@@ -9,23 +9,27 @@ logger = logging.getLogger('twitstlk')
 logger.setLevel(logging.INFO)
 logger.addHandler(handler)
 
-import twitter
 import sys
 import os
 import urllib
-import urllib2
 import Image
 import re
-from time import sleep
+from time import sleep, mktime
 from htmlentitydefs import codepoint2name
 from subprocess import Popen
+import pynotify
+import twitter
+from feedparser import parse
 
-CONSUMER_KEY = '4ErIfugB5uqzSRUKtFQ3qg'
-OAUTH_TOKEN = '20048350-pua2lt9w54fIjKnTySemp9gr8tNYQo2vQjh9D7hwm'
-
-# --- NEED TO BE CHANGED ---
-CONSUMER_SECRET = '...'
-OAUTH_TOKEN_SECRET = '...'
+# --- NEED TO BE CHANGED ACCORDINGLY ---
+# You have to create a new application (go to https://dev.twitter.com/apps/)
+# in order to get valid tokens that will grant twitstlk access to your twitter account.
+GREADER_SHARED_ATOM = 'http://www.google.com/reader/public/atom/user/11898197621162994883/label/partage?n=50'
+CONSUMER_KEY = ''
+OAUTH_TOKEN = ''
+CONSUMER_SECRET = ''
+OAUTH_TOKEN_SECRET = ''
+SCREENLOCKERS = ['kscreenlocker', 'xlock', ]
 STORAGE_DIR = '~/.twitstlk'
 # -------------------------------------------------------------------
 
@@ -38,39 +42,45 @@ for i in ('http', 'https'):
 OAUTH = dict(consumer_key=CONSUMER_KEY, consumer_secret=CONSUMER_SECRET,
   access_token_key=OAUTH_TOKEN, access_token_secret=OAUTH_TOKEN_SECRET)
 
-SINCE_ID_FILE = STORAGE_DIR + '/since_id.txt'
-LOCK_FILE = STORAGE_DIR + '/running.pid'
 
 def escape(s):
   """Encode every '&' that is not a htmlentity into the HTML entity '&amp;'"""
-  return re.sub(r'&(?!%s;)' % '|'.join(codepoint2name.values()), 'amp;', s)
+  return re.sub(r'&(?!%s;)' % ';|'.join(codepoint2name.values()), '&amp;', s)
+
 
 def notify(summary, body, icon='/usr/share/icons/oxygen/32x32/apps/preferences-desktop-notification.png', delay=7):
-  cmd = ['/usr/bin/notify-send',
-         '-u', 'low',
-         '-i', icon,
-         '-t', '%d' % (delay*1000,),
-         '--',
-         summary,
-         body.encode('utf-8')]
-  Popen(cmd)
-  sleep(delay+1)
+  pynotify.init('twitstlk')
+  n = pynotify.Notification(summary, body, icon)
+  n.set_urgency(pynotify.URGENCY_LOW)
+  n.set_timeout(delay*1000)
+  n.show()
 
-def auth_api():
+  sleep(delay+2)
+
+
+def twitter_authapi():
   return twitter.Api(timeout=30, proxy=API_PROXIES, **OAUTH)
 
-def friends_timeline():
-  api = auth_api()
-  if os.path.isfile(since_id_file) and os.path.getsize(since_id_file):
-    since_id = open(since_id_file).read()
+
+def twitter_friends_timeline():
+
+  image_dir = os.path.join(os.path.expanduser(STORAGE_DIR), 'images')
+  if not os.path.isdir(image_dir):
+    os.makedirs(image_dir)
+
+  last_file = os.path.join(os.path.expanduser(STORAGE_DIR), 'twitter_last.txt')
+
+  api = twitter_authapi()
+  if os.path.isfile(last_file) and os.path.getsize(last_file):
+    since_id = open(last_file).read()
     friends = api.GetFriendsTimeline(since_id=since_id, retweets=True)
   else:
     friends = api.GetFriendsTimeline(count=10, retweets=True)
 
   for f in friends[::-1]:
     name = f.user.screen_name
-    text = re.sub(r'(https?://\S+)', r'<a href="\1">\1</a>', escape(f.text))
-    image = '%s/%s.png' % (storage_dir, f.user.id)
+    text = re.sub(r'(https?://t.co/[a-zA-Z0-9]+)', r'<a href="\1">\1</a>', escape(f.text))
+    image = '%s/%s.png' % (image_dir, f.user.id)
     if not os.path.isfile(image):
       urllib.urlretrieve(f.user.profile_image_url, image)
       Image.open(image).convert('RGBA').save(image)
@@ -78,11 +88,78 @@ def friends_timeline():
     notify(name, text, image)
 
   if friends:
-    logger.info('Updating %s' % since_id_file)
-    open(since_id_file, 'w').write('%s' % max(f.id for f in friends))
+    update_last(last_file, max(f.id for f in friends))
 
   rate = api.GetRateLimitStatus()
   logger.info('Rate: %s / %s' % (rate['remaining_hits'], rate['hourly_limit']))
+
+
+def twitter_trends():
+  api = twitter_authapi()
+  trends = api.GetTrendsCurrent()
+  notify('trends', '\n'.join(t.name for t in trends))
+
+
+def twitter_timeline():
+  api = twitter_authapi()
+  last_id = '124711885940600832' #None
+  nb_tweets = 0
+
+  while True:
+    tweets = api.GetFriendsTimeline(retweets=True, count=100, max_id=last_id)
+    if not tweets:
+      break
+    for t in tweets:
+      last_id, name, text = t.id, t.user.screen_name, t.text
+      print('%-4d %d %s %s' % (nb_tweets, last_id, name, text))
+      nb_tweets += 1
+  print('Total tweets: %d' % nb_tweets)
+
+
+def update_last(last_file, last_value):
+  if not is_screen_locked():
+    logger.info('Updating %s' % last_file)
+    open(last_file, 'w').write('%s' % last_value)
+  
+
+def greader_shared():
+
+  last_file = os.path.join(os.path.expanduser(STORAGE_DIR), 'greader_last.txt')
+  if os.path.isfile(last_file) and os.path.getsize(last_file):
+    last_time = float(open(last_file).read())
+  else:
+    last_time = None
+
+  news = []
+  feed = parse(GREADER_SHARED_ATOM)
+  for e in reversed(feed.entries):
+    e.updated_parsed = mktime(e.updated_parsed) 
+    if last_time and e.updated_parsed <= last_time:
+      continue
+
+    news.append(e)
+
+  for e in news:
+    summary = e.source.title
+    authors = ', '.join(v.name for v in e.authors if v.name != '(author unknown)')
+    if authors:
+      summary += '- %s' % authors
+    body = re.sub(r'(https?://\S+)', r'<a href="\1">\1</a>', '%s\n%s' % (e.title, e.link))
+
+    image = os.path.join(os.path.dirname(__file__), 'greader.png')
+
+    summary, body = escape(summary), escape(body)
+    notify(summary, body, image)
+
+  if news:
+    update_last(last_file, max(e.updated_parsed for e in news))
+    
+
+def is_screen_locked():
+  for locker in SCREENLOCKERS:
+    if [x for x in os.popen('pgrep %s' % locker)]:
+      return True
+  return False
 
 if __name__ == '__main__':
 
@@ -90,30 +167,36 @@ if __name__ == '__main__':
     action = sys.argv[1]
 
     if action == 'trends':
-      api = auth_api()
-      trends = api.GetTrendsCurrent()
-      notify('trends', '\n'.join(t.query for t in trends))
+      twitter_trends()
+    
+    elif action == 'timeline':
+      twitter_timeline()
+    
+    else:
+      raise NotImplementedError('incorrect given action')
 
   else:
-    storage_dir = os.path.expanduser(STORAGE_DIR)
-    lock_file = os.path.expanduser(LOCK_FILE)
-    since_id_file = os.path.expanduser(SINCE_ID_FILE)
 
-    if not os.path.isdir(storage_dir):
-      os.makedirs(storage_dir)
+    if is_screen_locked():
+      sys.exit(0)
+
+    lock_file = os.path.join(os.path.expanduser(STORAGE_DIR), 'running.pid')
 
     if os.path.isfile(lock_file) and os.path.getsize(lock_file):
       running_pid = open(lock_file).read()
-      logger.info('Already running instance detected, PID: %s' % running_pid)
-      sys.exit(0)
+      if not os.path.isdir('/proc/%s' % running_pid):
+        os.remove(lock_file)
+      else:
+        logger.info('Already running instance detected, PID: %s' % running_pid)
+        sys.exit(0)
 
     try:
       open(lock_file, 'w').write('%d' % os.getpid())
-      friends_timeline()
+      twitter_friends_timeline()
+      greader_shared()
     except:
       e_type, e_value, _ = sys.exc_info()
       logger.warn('%s, %s' % (e_type, e_value))
-      sys.exit(0)
     finally:
       os.remove(lock_file)
 
