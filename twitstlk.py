@@ -146,7 +146,7 @@ def greader_shared():
       summary += '- %s' % authors
     body = re.sub(r'(https?://\S+)', r'<a href="\1">\1</a>', '%s\n%s' % (e.title, e.link))
 
-    image = os.path.join(os.path.dirname(__file__), 'greader.png')
+    image = os.path.join(os.path.dirname(__file__), 'greader.jpg')
 
     summary, body = escape(summary), escape(body)
     notify(summary, body, image)
