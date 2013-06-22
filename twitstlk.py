@@ -24,20 +24,19 @@ from feedparser import parse
 # --- NEED TO BE CHANGED ACCORDINGLY ---
 # You have to create a new application (go to https://dev.twitter.com/apps/)
 # in order to get valid tokens that will grant twitstlk access to your twitter account.
-GREADER_SHARED_ATOM = 'http://www.google.com/reader/public/atom/user/11898197621162994883/label/partage?n=50'
 CONSUMER_KEY = ''
 OAUTH_TOKEN = ''
 CONSUMER_SECRET = ''
 OAUTH_TOKEN_SECRET = ''
-SCREENLOCKERS = ['kscreenlocker', 'xlock', ]
+SCREENLOCKERS = ['kscreenlocker', 'xlock', 'slock']
 STORAGE_DIR = '~/.twitstlk'
 # -------------------------------------------------------------------
 
-API_PROXIES = {}
+PROXIES = {}
 for i in ('http', 'https'):
   k = '%s_proxy' % i
   if k in os.environ:
-    API_PROXIES[i] = os.environ[k]
+    PROXIES[i] = os.environ[k]
 
 OAUTH = dict(consumer_key=CONSUMER_KEY, consumer_secret=CONSUMER_SECRET,
   access_token_key=OAUTH_TOKEN, access_token_secret=OAUTH_TOKEN_SECRET)
@@ -48,7 +47,7 @@ def escape(s):
   return re.sub(r'&(?!%s;)' % ';|'.join(codepoint2name.values()), '&amp;', s)
 
 
-def notify(summary, body, icon='/usr/share/icons/oxygen/32x32/apps/preferences-desktop-notification.png', delay=7):
+def notify(summary, body, icon='/usr/share/icons/Fedora/32x32/places/start-here.png', delay=7):
   pynotify.init('twitstlk')
   n = pynotify.Notification(summary, body, icon)
   n.set_urgency(pynotify.URGENCY_LOW)
@@ -59,7 +58,7 @@ def notify(summary, body, icon='/usr/share/icons/oxygen/32x32/apps/preferences-d
 
 
 def twitter_authapi():
-  return twitter.Api(timeout=30, proxy=API_PROXIES, **OAUTH)
+  return twitter.Api(**OAUTH)
 
 
 def twitter_friends_timeline():
@@ -73,16 +72,16 @@ def twitter_friends_timeline():
   api = twitter_authapi()
   if os.path.isfile(last_file) and os.path.getsize(last_file):
     since_id = open(last_file).read()
-    friends = api.GetFriendsTimeline(since_id=since_id, retweets=True)
+    friends = api.GetHomeTimeline(since_id=since_id)
   else:
-    friends = api.GetFriendsTimeline(count=10, retweets=True)
+    friends = api.GetHomeTimeline(count=10)
 
   for f in friends[::-1]:
     name = f.user.screen_name
     text = re.sub(r'(https?://t.co/[a-zA-Z0-9]+)', r'<a href="\1">\1</a>', escape(f.text))
     image = '%s/%s.png' % (image_dir, f.user.id)
     if not os.path.isfile(image):
-      urllib.urlretrieve(f.user.profile_image_url, image)
+      urllib.URLopener(proxies=PROXIES).retrieve(f.user.profile_image_url, image)
       Image.open(image).convert('RGBA').save(image)
 
     notify(name, text, image)
@@ -102,11 +101,11 @@ def twitter_trends():
 
 def twitter_timeline():
   api = twitter_authapi()
-  last_id = '124711885940600832' #None
+  last_id = None #'124711885940600832'
   nb_tweets = 0
 
   while True:
-    tweets = api.GetFriendsTimeline(retweets=True, count=100, max_id=last_id)
+    tweets = api.GetHomeTimeline(count=100, max_id=last_id)
     if not tweets:
       break
     for t in tweets:
@@ -122,7 +121,9 @@ def update_last(last_file, last_value):
     open(last_file, 'w').write('%s' % last_value)
   
 
+# google reader will no longer exist by July 2013
 def greader_shared():
+  GREADER_SHARED_ATOM = 'http://www.google.com/reader/public/atom/user/11898197621162994883/label/partage?n=50'
 
   last_file = os.path.join(os.path.expanduser(STORAGE_DIR), 'greader_last.txt')
   if os.path.isfile(last_file) and os.path.getsize(last_file):
@@ -193,7 +194,7 @@ if __name__ == '__main__':
     try:
       open(lock_file, 'w').write('%d' % os.getpid())
       twitter_friends_timeline()
-      greader_shared()
+      #greader_shared() # RIP google reader
     except:
       e_type, e_value, _ = sys.exc_info()
       logger.warn('%s, %s' % (e_type, e_value))
