@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 
+# Check twitter every minute and display new tweets with on screen display notifications using pynotify.
+# --lanjelot
+
 import logging
 from logging.handlers import SysLogHandler
 formatter = logging.Formatter('%(name)s[%(process)d]: %(levelname)s - %(message)s')
@@ -12,7 +15,7 @@ logger.addHandler(handler)
 import sys
 import os
 import urllib
-import Image
+from PIL import Image
 import re
 from time import sleep, mktime
 from htmlentitydefs import codepoint2name
@@ -90,7 +93,8 @@ def twitter_friends_timeline():
     update_last(last_file, max(f.id for f in friends))
 
   rate = api.GetRateLimitStatus()
-  logger.info('Rate: %s / %s' % (rate['remaining_hits'], rate['hourly_limit']))
+  limit = rate['resources']['application']['/application/rate_limit_status']
+  logger.info('Rate: %s / %s' % (limit['remaining'], limit['limit']))
 
 
 def twitter_trends():
